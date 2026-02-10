@@ -39,7 +39,7 @@ async function rebuildIndex(pool) {
   // Simple tokenizer: lowercase and split on non-alphanumerics.
   // This is sufficient for Phase 1 baseline and deterministic synthetic dataset.
   const sql = `
-    TRUNCATE TABLE inverted_index;
+    TRUNCATE TABLE inverted_index RESTART IDENTITY;
 
     WITH tokens AS (
       SELECT
