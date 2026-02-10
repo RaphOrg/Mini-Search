@@ -2,34 +2,13 @@
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import http from 'node:http';
-import net from 'node:net';
-import { randomUUID } from 'node:crypto';
 
 import pg from 'pg';
 
+import { createIsolatedDatabase, requireEnv } from './smoke_db_utils.js';
+
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
-}
-
-async function waitForPort(host, port, { timeoutMs = 15000 } = {}) {
-  const start = Date.now();
-  // eslint-disable-next-line no-constant-condition
-  while (true) {
-    try {
-      await new Promise((resolve, reject) => {
-        const s = net.connect(port, host);
-        s.once('connect', () => {
-          s.end();
-          resolve();
-        });
-        s.once('error', reject);
-      });
-      return;
-    } catch {
-      if (Date.now() - start > timeoutMs) throw new Error(`Timed out waiting for ${host}:${port}`);
-      await sleep(200);
-    }
-  }
 }
 
 function run(cmd, args, { env } = {}) {
@@ -44,15 +23,6 @@ function run(cmd, args, { env } = {}) {
       else reject(new Error(`${cmd} ${args.join(' ')} exited with code ${code}`));
     });
   });
-}
-
-async function commandExists(cmd) {
-  try {
-    await run(cmd, ['--version']);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 function httpJson(method, url, body, { timeoutMs = 10000 } = {}) {
@@ -96,72 +66,47 @@ function httpJson(method, url, body, { timeoutMs = 10000 } = {}) {
   });
 }
 
+async function waitForHealth(baseUrl, { timeoutMs = 15000 } = {}) {
+  const start = Date.now();
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    try {
+      const r = await httpJson('GET', `${baseUrl}/health`);
+      if (r.status === 200) return;
+    } catch {
+      // ignore
+    }
+    if (Date.now() - start > timeoutMs) throw new Error('Timed out waiting for server /health');
+    await sleep(200);
+  }
+}
+
 async function main() {
-  // Preferred: caller provides DATABASE_URL (can point to local Postgres or docker-compose)
-  // Fallback: if docker is available, spin up a temporary Postgres container.
+  // Requires a locally available Postgres via DATABASE_URL.
+  requireEnv('DATABASE_URL');
 
   const SERVER_PORT = Number(process.env.SMOKE_SERVER_PORT ?? 3333);
-  const runId = (process.env.SMOKE_RUN_ID ?? randomUUID()).slice(0, 8);
 
-  const dockerAvailable = await commandExists('docker');
-
-  const POSTGRES_PORT = Number(process.env.SMOKE_POSTGRES_PORT ?? 55432);
-  const containerName = `mini-search-smoke-pg-${runId}`;
-
-  const dbName = process.env.SMOKE_DB_NAME ?? 'mini_search_smoke';
-  const dbUser = process.env.SMOKE_DB_USER ?? 'postgres';
-  const dbPass = process.env.SMOKE_DB_PASSWORD ?? 'postgres';
-
-  const providedDatabaseUrl = process.env.DATABASE_URL ?? null;
-  const databaseUrl =
-    providedDatabaseUrl ??
-    `postgres://${encodeURIComponent(dbUser)}:${encodeURIComponent(dbPass)}@localhost:${POSTGRES_PORT}/${dbName}`;
+  const isolated = await createIsolatedDatabase({ prefix: 'mini_search_smoke_db' });
+  const databaseUrl = isolated.databaseUrl;
 
   let serverProc;
-  let startedDockerPg = false;
 
   try {
-    if (!providedDatabaseUrl) {
-      if (!dockerAvailable) {
-        throw new Error(
-          'DATABASE_URL not set and docker not found. Provide DATABASE_URL to a running Postgres, or install docker.'
-        );
-      }
-
-      // Start Postgres container
-      await run('docker', [
-        'run',
-        '--rm',
-        '-d',
-        '--name',
-        containerName,
-        '-e',
-        `POSTGRES_PASSWORD=${dbPass}`,
-        '-e',
-        `POSTGRES_DB=${dbName}`,
-        '-p',
-        `${POSTGRES_PORT}:5432`,
-        'postgres:16-alpine',
-      ]);
-      startedDockerPg = true;
-
-      await waitForPort('127.0.0.1', POSTGRES_PORT, { timeoutMs: 20000 });
-    }
-
-    // Run migrations against fresh DB
+    // Run migrations against fresh isolated DB
     await run('npm', ['run', 'db:migrate'], {
       env: {
         DATABASE_URL: databaseUrl,
       },
     });
 
-    // Ingest >=20 via CLI (batch)
+    // Ingest exactly 20 via CLI (batch)
     const cliDocs = Array.from({ length: 20 }, (_, i) => ({
       title: `cli doc ${i + 1}`,
       body: `cli body ${i + 1} - quick brown fox ${i % 5}`,
     }));
 
-    // Write a temp file without adding repo artifacts.
+    const runId = isolated.dbName;
     const cliBatchFile = `/tmp/mini-search-cli-docs-${runId}.json`;
     await run('node', [
       '-e',
@@ -176,7 +121,7 @@ async function main() {
       },
     });
 
-    // Start HTTP server and ingest >=20 via HTTP batch
+    // Start HTTP server and ingest exactly 20 via HTTP batch
     serverProc = spawn('node', ['src/index.js'], {
       stdio: 'inherit',
       env: {
@@ -186,22 +131,8 @@ async function main() {
       },
     });
 
-    // Wait for /health
     const baseUrl = `http://127.0.0.1:${SERVER_PORT}`;
-    {
-      const start = Date.now();
-      // eslint-disable-next-line no-constant-condition
-      while (true) {
-        try {
-          const r = await httpJson('GET', `${baseUrl}/health`);
-          if (r.status === 200) break;
-        } catch {
-          // ignore
-        }
-        if (Date.now() - start > 15000) throw new Error('Timed out waiting for server /health');
-        await sleep(200);
-      }
-    }
+    await waitForHealth(baseUrl);
 
     const httpDocs = Array.from({ length: 20 }, (_, i) => ({
       title: `http doc ${i + 1}`,
@@ -216,14 +147,13 @@ async function main() {
       throw new Error(`Expected HTTP insert count=20, got: ${JSON.stringify(resp.body)}`);
     }
 
-    // Sanity SELECT and schema-field verification
     const { Client } = pg;
     const client = new Client({ connectionString: databaseUrl });
     await client.connect();
 
     const countRes = await client.query('SELECT COUNT(*)::int AS n FROM documents');
     const n = countRes.rows[0]?.n ?? 0;
-    if (n < 40) throw new Error(`Expected at least 40 documents, found ${n}`);
+    if (n !== 40) throw new Error(`Expected exactly 40 documents (20 cli + 20 http), found ${n}`);
 
     const rowRes = await client.query('SELECT id, title, body, created_at FROM documents ORDER BY id ASC LIMIT 5');
     for (const r of rowRes.rows) {
@@ -241,19 +171,12 @@ async function main() {
       serverProc.kill('SIGTERM');
       await Promise.race([once(serverProc, 'exit'), sleep(2000)]);
     }
-
-    if (startedDockerPg) {
-      try {
-        await run('docker', ['rm', '-f', containerName]);
-      } catch {
-        // ignore
-      }
-    }
+    await isolated.drop();
   }
 }
 
 main().catch((err) => {
   // eslint-disable-next-line no-console
-  console.error(err);
+  console.error(err?.message || err);
   process.exitCode = 1;
 });
