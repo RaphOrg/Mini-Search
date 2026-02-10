@@ -18,22 +18,27 @@ class AppIndex {
 
   /**
    * Query adapter used by src/query/index.js.
+   *
+   * Keep this stable and independent from the internal index representation.
+   *
    * @param {string} term
-   * @returns {Set<string>} docIds containing the term
+   * @returns {Map<number, number>} Map of docId -> term frequency
    */
   getPostings(term) {
     const list = this.index.postings.get(term) ?? [];
-    return new Set(list.map((p) => String(p.docId)));
+    const out = new Map();
+    for (const p of list) out.set(Number(p.docId), Number(p.tf) || 0);
+    return out;
   }
 
   /** @param {number} id */
   getDoc(id) {
-    return this.docs.get(id) ?? null;
+    return this.docs.get(Number(id)) ?? null;
   }
 
   /** @param {number} id */
   hasDoc(id) {
-    return this.docs.has(id);
+    return this.docs.has(Number(id));
   }
 }
 

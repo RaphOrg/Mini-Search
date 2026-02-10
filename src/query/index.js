@@ -4,13 +4,13 @@
  * Supports basic multi-term keyword boolean search:
  * - AND is default (intersection)
  * - OR can be requested via mode='or'
- *
- * Parsing is intentionally simple for MVP: terms are whitespace separated.
  */
 
+import { tokenize as sharedTokenize } from '../shared/tokenizer.js';
+
 /**
- * @param {Set<string>} a
- * @param {Set<string>} b
+ * @param {Set<number>} a
+ * @param {Set<number>} b
  */
 function intersect(a, b) {
   // Iterate the smaller set for speed.
@@ -21,8 +21,8 @@ function intersect(a, b) {
 }
 
 /**
- * @param {Set<string>} a
- * @param {Set<string>} b
+ * @param {Set<number>} a
+ * @param {Set<number>} b
  */
 function union(a, b) {
   const out = new Set(a);
@@ -31,17 +31,13 @@ function union(a, b) {
 }
 
 function tokenizeQuery(q) {
-  if (!q) return [];
-  return q
-    .trim()
-    .split(/\s+/g)
-    .map((t) => t.trim())
-    .filter(Boolean);
+  // Match indexing normalization/tokenization exactly.
+  return sharedTokenize(q, { removeStopwords: false, asciiFold: false });
 }
 
 /**
  * @param {{ q: string, mode?: 'and'|'or', limit?: number }} params
- * @param {{ getPostings: (term: string) => Set<string> }} index
+ * @param {{ getPostings: (term: string) => Map<number, number> }} index
  */
 export function search(params, index) {
   const q = params?.q ?? '';
@@ -54,23 +50,21 @@ export function search(params, index) {
 
   let acc = null;
   for (const term of terms) {
-    const postings = index.getPostings(term);
+    const postingsMap = index.getPostings(term);
+    const postings = new Set(postingsMap.keys());
 
     if (acc == null) {
-      // Clone to avoid mutating index-owned sets.
-      acc = new Set(postings);
+      acc = postings;
       continue;
     }
 
     acc = mode === 'or' ? union(acc, postings) : intersect(acc, postings);
 
-    // Early exit for AND: once empty, stays empty.
     if (mode !== 'or' && acc.size === 0) break;
   }
 
   const docIds = Array.from(acc ?? []);
-  // Stable by docId (acceptance allows unsorted; stable ordering is nicer).
-  docIds.sort();
+  docIds.sort((a, b) => a - b);
 
   const limited = limit == null ? docIds : docIds.slice(0, limit);
 
