@@ -1,5 +1,5 @@
 import { InvertedIndex } from '../indexer/invertedIndex.js';
-import { tokenize, termFrequencies } from '../indexer/tokenize.js';
+import { tokenize as sharedTokenize } from '../shared/tokenizer.js';
 
 /**
  * Minimal in-process app state for Phase 1/2.
@@ -8,6 +8,12 @@ import { tokenize, termFrequencies } from '../indexer/tokenize.js';
  * and the entrypoint seeds the index at boot.
  */
 let appIndex = null;
+
+function termFrequencies(tokens) {
+  const tf = new Map();
+  for (const t of tokens) tf.set(t, (tf.get(t) ?? 0) + 1);
+  return tf;
+}
 
 class AppIndex {
   constructor() {
@@ -27,7 +33,16 @@ class AppIndex {
   getPostings(term) {
     const list = this.index.postings.get(term) ?? [];
     const out = new Map();
-    for (const p of list) out.set(Number(p.docId), Number(p.tf) || 0);
+
+    for (const p of list) {
+      const docId = Number(p?.docId);
+      const tf = Number(p?.tf);
+
+      // Guard against corrupted postings (e.g. from JSON restore).
+      if (!Number.isInteger(docId) || docId < 0) continue;
+      out.set(docId, Number.isFinite(tf) && tf > 0 ? tf : 0);
+    }
+
     return out;
   }
 
@@ -58,7 +73,8 @@ export function initAppIndex(docs = []) {
     const text = typeof doc.text === 'string' ? doc.text : '';
     store.docs.set(id, { id, text });
 
-    const tokens = tokenize(text);
+    // Use the same tokenizer for indexing and querying.
+    const tokens = sharedTokenize(text);
     const tfByTerm = termFrequencies(tokens);
     store.index.addDocument(id, tfByTerm);
   }
