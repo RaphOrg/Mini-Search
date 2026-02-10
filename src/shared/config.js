@@ -38,4 +38,7 @@ export const config = {
   // Enable explicitly in dev/smoke via INCLUDE_STACK=1.
   includeErrorStack: boolFromEnv('INCLUDE_STACK', false),
   nodeEnv: process.env.NODE_ENV ?? 'development',
+
+  // Debug/smoke repro
+  skipSeedIndex: boolFromEnv('SKIP_SEED_INDEX', false),
 };
