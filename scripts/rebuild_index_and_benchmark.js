@@ -23,8 +23,10 @@ function parseArgs(argv) {
 function usage() {
   return `Usage: node scripts/rebuild_index_and_benchmark.js [--limit 10] [--repeats 30] [--warmup 5] [--queries "alpha,beta,w10"] [--no-rebuild]
 
-Rebuilds inverted_index from documents and benchmarks query latency.
+Rebuilds inverted_index from documents (unless --no-rebuild) and benchmarks query latency.
 Requires DATABASE_URL.
+
+Note: Using --no-rebuild can produce misleading results if documents have changed since the last index build.
 
 Output: p50/p95 in ms (plus min/max).
 `;
@@ -85,6 +87,14 @@ async function main() {
   try {
     // Ensure tables exist (schema.sql is executed by generator; still guard here)
     await pool.query(`SELECT 1 FROM information_schema.tables WHERE table_name = 'documents'`);
+
+    if (!args.rebuild) {
+      // Guardrail: ensure inverted_index table exists when skipping rebuild.
+      const r = await pool.query(`SELECT to_regclass('public.inverted_index') as t`);
+      if (!r.rows?.[0]?.t) {
+        throw new Error('inverted_index table not found; rerun without --no-rebuild to build it');
+      }
+    }
 
     if (args.rebuild) {
       const t0 = performance.now();
