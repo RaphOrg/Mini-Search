@@ -35,7 +35,7 @@ const cases = [
   },
   {
     label: 'smart apostrophe normalized and split by default',
-    input: "Dont stop",
+    input: 'Don\u2019t stop',
     options: {},
     expected: ['don', 't', 'stop'],
   },

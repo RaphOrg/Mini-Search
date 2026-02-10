@@ -56,9 +56,10 @@ function coerceStopwords(stopwords) {
 }
 
 function maybeAsciiFold(input) {
+  const s = typeof input === 'string' ? input : String(input);
   // NFKD splits base letters from combining marks; removing combining marks folds accents.
   // This is deterministic and built-in; no external NLP lib.
-  return input.normalize('NFKD').replace(/[\u0300-\u036f]/g, '');
+  return s.normalize('NFKD').replace(/[\u0300-\u036f]/g, '');
 }
 
 /**
@@ -104,9 +105,15 @@ export function normalizeText(text, options = {}) {
 
   if (preserveApostrophes) {
     // Only keep apostrophes that are internal to a token (letters/numbers on both sides).
-    // e.g. "rock 'n' roll" -> "rock n roll" (quotes removed)
-    s = s.replace(/(^|\s)'|'(\s|$)/g, ' ');
-    s = s.replace(/(\s)'+/g, '$1');
+    // Strip apostrophes that are not internal to an alnum token.
+    // Uses capture groups (no lookbehind) for broad Node compatibility.
+    // Examples:
+    // - "rock 'n' roll" -> "rock n roll" (quotes removed)
+    // - "''word''" -> "word"
+    // - "word'''" -> "word"
+    s = s.replace(/(^|[^\p{L}\p{N}])'+|'+([^\p{L}\p{N}]|$)/gu, '$1$2');
+    // Collapse any remaining repeated apostrophes inside tokens: rock''n -> rock'n
+    s = s.replace(/'+/g, "'");
   }
 
   // Collapse whitespace.
