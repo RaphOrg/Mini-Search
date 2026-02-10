@@ -19,6 +19,12 @@ function portFromEnv(name, fallback) {
   return value;
 }
 
+function boolFromEnv(name, fallback = false) {
+  const raw = process.env[name];
+  if (raw == null || raw === '') return fallback;
+  return raw === '1' || raw.toLowerCase() === 'true' || raw.toLowerCase() === 'yes';
+}
+
 export const config = {
   port: portFromEnv('PORT', 3000),
   // Optional for Phase 1 scaffolding; required for Postgres-backed indexing.
@@ -27,4 +33,12 @@ export const config = {
   // Indexing knobs
   indexBatchSize: Number(process.env.INDEX_BATCH_SIZE ?? 1000),
   indexPersistPath: process.env.INDEX_PERSIST_PATH ?? null,
+
+  // Error surfacing (safe by default)
+  // Enable explicitly in dev/smoke via INCLUDE_STACK=1.
+  includeErrorStack: boolFromEnv('INCLUDE_STACK', false),
+  nodeEnv: process.env.NODE_ENV ?? 'development',
+
+  // Debug/smoke repro
+  skipSeedIndex: boolFromEnv('SKIP_SEED_INDEX', false),
 };
