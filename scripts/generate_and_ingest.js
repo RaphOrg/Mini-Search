@@ -71,7 +71,8 @@ function generateDoc(rng, i, vocab) {
 }
 
 async function ensureSchema(pool) {
-  const sql = await readFile(new URL('./schema.sql', import.meta.url), 'utf8');
+  // Use migrations as the source of truth for schema.
+  const sql = await readFile(new URL('../migrations/001_create_documents.sql', import.meta.url), 'utf8');
   await pool.query(sql);
 }
 
