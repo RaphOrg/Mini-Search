@@ -1,26 +1,23 @@
 #!/usr/bin/env node
+import { readFile } from 'node:fs/promises';
 import pg from 'pg';
 
 import { createIsolatedDatabase, requireEnv } from './smoke_db_utils.js';
 
-function shEscapeSingle(s) {
-  return `'${String(s).replaceAll("'", `'"'"'`)}'`;
+function parseArgs(argv) {
+  return { json: argv.includes('--json') };
 }
 
-async function runMigrations(databaseUrl) {
-  // Run the same migration command used elsewhere.
-  const { spawn } = await import('node:child_process');
-  await new Promise((resolve, reject) => {
-    const child = spawn('npm', ['run', 'db:migrate'], {
-      stdio: 'inherit',
-      env: { ...process.env, DATABASE_URL: databaseUrl },
-    });
-    child.on('error', reject);
-    child.on('exit', (code) => {
-      if (code === 0) resolve();
-      else reject(new Error(`npm run db:migrate exited with code ${code}`));
-    });
-  });
+async function ensureSchema(databaseUrl) {
+  const sql = await readFile(new URL('../migrations/001_create_documents.sql', import.meta.url), 'utf8');
+  const { Client } = pg;
+  const client = new Client({ connectionString: databaseUrl });
+  await client.connect();
+  try {
+    await client.query(sql);
+  } finally {
+    await client.end();
+  }
 }
 
 async function seedFixtures(databaseUrl) {
@@ -28,11 +25,8 @@ async function seedFixtures(databaseUrl) {
   const client = new Client({ connectionString: databaseUrl });
   await client.connect();
   try {
-    // Ensure a clean state even if migrations create defaults later.
-    await client.query('TRUNCATE TABLE inverted_index RESTART IDENTITY CASCADE');
     await client.query('TRUNCATE TABLE documents RESTART IDENTITY CASCADE');
 
-    // Insert exactly 3 docs with deterministic IDs 1..3
     await client.query(
       `INSERT INTO documents (external_id, title, body)
        VALUES
@@ -52,30 +46,25 @@ async function seedFixtures(databaseUrl) {
 }
 
 async function main() {
+  const args = parseArgs(process.argv);
+  if (!args.json) throw new Error('Usage: node scripts/smoke_search_setup.js --json');
+
   requireEnv('DATABASE_URL');
   const isolated = await createIsolatedDatabase({ prefix: 'mini_search_smoke_search' });
+
   try {
-    await runMigrations(isolated.databaseUrl);
+    await ensureSchema(isolated.databaseUrl);
     await seedFixtures(isolated.databaseUrl);
 
-    // Print shell assignments for the parent bash script to eval.
-    // We intentionally print DROP_DB_CMD rather than calling drop here.
-    process.stdout.write(
-      `export DATABASE_URL=${shEscapeSingle(isolated.databaseUrl)}\n` +
-        `export DROP_DB_CMD=${shEscapeSingle(
-          `node -e "import('./scripts/smoke_db_utils.js').then(async m => { process.env.DATABASE_URL=${shEscapeSingle(
-            requireEnv('DATABASE_URL')
-          )}; const i=await m.createIsolatedDatabase({prefix:'noop'}); })"`
-        )}\n`
-    );
+    process.stdout.write(JSON.stringify({ databaseUrl: isolated.databaseUrl, dbName: isolated.dbName }));
   } catch (e) {
-    // If setup fails, drop the DB immediately.
     await isolated.drop();
     throw e;
   }
 }
 
 main().catch((err) => {
+  // eslint-disable-next-line no-console
   console.error(err?.message || err);
   process.exitCode = 1;
 });
