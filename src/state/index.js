@@ -36,7 +36,11 @@ export function initAppIndex(docs = []) {
 
   for (const doc of docs) {
     const id = Number(doc.id);
-    const text = String(doc.text ?? '');
+    if (!Number.isInteger(id) || id < 0) {
+      throw new TypeError(`Invalid doc.id: ${doc?.id}`);
+    }
+
+    const text = typeof doc.text === 'string' ? doc.text : '';
     store.docs.set(id, { id, text });
 
     const tokens = tokenize(text);
@@ -44,7 +48,7 @@ export function initAppIndex(docs = []) {
     store.index.addDocument(id, tfByTerm);
   }
 
-  store.index.finalize();
+  if (docs.length > 0) store.index.finalize();
   appIndex = store;
   return appIndex;
 }
