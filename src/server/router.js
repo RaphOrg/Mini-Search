@@ -1,5 +1,10 @@
 import { healthHandler } from './routes/health.js';
 import { searchHandler } from './routes/search.js';
+import {
+  createDocumentHandler,
+  createDocumentsBatchHandler,
+  getDocumentByIdHandler,
+} from './routes/documents.js';
 
 export async function router(req, res) {
   // Use a constant origin to avoid trusting/misparsing a user-controlled Host header.
@@ -11,6 +16,19 @@ export async function router(req, res) {
 
   if (req.method === 'GET' && url.pathname === '/search') {
     return searchHandler(req, res, url);
+  }
+
+  if (req.method === 'POST' && url.pathname === '/documents') {
+    return createDocumentHandler(req, res);
+  }
+
+  if (req.method === 'POST' && url.pathname === '/documents/batch') {
+    return createDocumentsBatchHandler(req, res);
+  }
+
+  const docIdMatch = url.pathname.match(/^\/documents\/(\d+)$/);
+  if (req.method === 'GET' && docIdMatch) {
+    return getDocumentByIdHandler(req, res, docIdMatch[1]);
   }
 
   res.statusCode = 404;

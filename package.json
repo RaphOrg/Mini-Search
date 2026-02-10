@@ -14,7 +14,8 @@
     "bench": "node scripts/rebuild_index_and_benchmark.js",
     "index:build": "node src/indexer/cli.js",
     "smoke:search": "PORT=${PORT:-3131} BASE_URL=http://127.0.0.1:${PORT:-3131} bash scripts/smoke_search.sh",
-    "smoke:perf": "node scripts/smoke_perf_baseline.js"
+    "smoke:perf": "node scripts/smoke_perf_baseline.js",
+    "smoke:db": "node scripts/smoke_db.js"
   },
   "dependencies": {
     "dotenv": "^16.4.5",
