@@ -4,11 +4,14 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "db:migrate": "psql \"$DATABASE_URL\" -f migrations/001_create_documents.sql",
+    "docs:cli": "node src/cli/documents.js",
     "dev": "node --watch src/index.js",
     "start": "node src/index.js",
     "check:tokenizer": "node scripts/tokenizer_check.js"
   },
   "dependencies": {
-    "dotenv": "^16.4.5"
+    "dotenv": "^16.4.5",
+    "pg": "^8.18.0"
   }
 }
