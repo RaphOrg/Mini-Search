@@ -16,6 +16,16 @@ class AppIndex {
     this.docs = new Map();
   }
 
+  /**
+   * Query adapter used by src/query/index.js.
+   * @param {string} term
+   * @returns {Set<string>} docIds containing the term
+   */
+  getPostings(term) {
+    const list = this.index.postings.get(term) ?? [];
+    return new Set(list.map((p) => String(p.docId)));
+  }
+
   /** @param {number} id */
   getDoc(id) {
     return this.docs.get(id) ?? null;
