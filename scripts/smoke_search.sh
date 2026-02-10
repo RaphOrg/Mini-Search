@@ -2,24 +2,42 @@
 set -euo pipefail
 
 # Smoke test for /search endpoint semantics + basic response contract.
-# - Starts the server
-# - Runs curl assertions for AND (default) and OR (mode=or)
-# - Verifies response shape includes docIds and snippet behavior doesn't crash
+# - Creates an isolated Postgres DB (derived from DATABASE_URL)
+# - Runs migrations and seeds a known fixture corpus
+# - Starts the server pointed at that DB
+# - Runs assertions with exact expected ids/counts
 
 PORT="${PORT:-3131}"
-BASE_URL="http://127.0.0.1:${PORT}"
+BASE_URL="${BASE_URL:-http://127.0.0.1:${PORT}}"
 export BASE_URL
+
+fail() {
+  echo "ERROR: $*" >&2
+  exit 1
+}
 
 cleanup() {
   if [[ -n "${SERVER_PID:-}" ]] && kill -0 "$SERVER_PID" 2>/dev/null; then
     kill "$SERVER_PID" || true
     wait "$SERVER_PID" 2>/dev/null || true
   fi
+
+  if [[ -n "${DROP_DB_CMD:-}" ]]; then
+    # shellcheck disable=SC2086
+    eval "$DROP_DB_CMD" || true
+  fi
 }
 trap cleanup EXIT
 
+command -v psql >/dev/null 2>&1 || fail "Missing prerequisite: psql. Install postgresql-client and ensure psql is on PATH."
+[[ -n "${DATABASE_URL:-}" ]] || fail "Missing required environment variable: DATABASE_URL (must point to a locally available Postgres)."
+
+# Create isolated DB + run migrations + seed fixtures; prints DATABASE_URL=<isolated> and DROP_DB_CMD=<...>
+# We eval it to export those vars into this shell.
+eval "$(node scripts/smoke_search_setup.js)"
+
 # Start server
-PORT="$PORT" node src/index.js > /tmp/mini-search-smoke-server.log 2>&1 &
+PORT="$PORT" DATABASE_URL="$DATABASE_URL" node src/index.js > /tmp/mini-search-smoke-server.log 2>&1 &
 SERVER_PID=$!
 
 # Wait for health
@@ -36,7 +54,7 @@ if ! curl -fsS "$BASE_URL/health" >/dev/null 2>&1; then
   exit 1
 fi
 
-node --input-type=module <<'NODE'
+BASE_URL="$BASE_URL" node --input-type=module <<'NODE'
 import assert from 'node:assert/strict';
 
 const base = process.env.BASE_URL;
@@ -47,7 +65,7 @@ async function getJson(url) {
   let json;
   try {
     json = JSON.parse(text);
-  } catch (e) {
+  } catch {
     throw new Error(`Non-JSON response from ${url}: ${text.slice(0, 200)}`);
   }
   if (!res.ok) {
@@ -56,12 +74,12 @@ async function getJson(url) {
   return json;
 }
 
-function asSet(arr) {
+function idsAsStrings(arr) {
   assert.ok(Array.isArray(arr), 'docIds should be an array');
-  return new Set(arr.map(String));
+  return arr.map(String);
 }
 
-// Known seed corpus in src/index.js:
+// Fixtures seeded by scripts/smoke_search_setup.js:
 // 1: quick brown fox ... lazy dog
 // 2: quick red fox ... sleeping cat
 // 3: cats and dogs can be friends
@@ -71,25 +89,22 @@ function asSet(arr) {
   const j = await getJson(`${base}/search?q=${encodeURIComponent('quick fox')}`);
   assert.equal(j.mode, 'and');
   assert.deepEqual(j.terms, ['quick', 'fox']);
-  const ids = asSet(j.docIds);
-  assert.deepEqual(ids, new Set(['1','2']));
+  assert.deepEqual(idsAsStrings(j.docIds), ['1', '2']);
   assert.equal(j.count, 2);
 }
 
 // AND default: "quick cat" should return only doc 2.
 {
   const j = await getJson(`${base}/search?q=${encodeURIComponent('quick cat')}`);
-  const ids = asSet(j.docIds);
-  assert.deepEqual(ids, new Set(['2']));
+  assert.deepEqual(idsAsStrings(j.docIds), ['2']);
   assert.equal(j.count, 1);
 }
 
-// OR mode: "cat dog" should return union (docs 1,2,3).
+// OR mode: "cat dog" should return union (docs 1,2,3) in docId order.
 {
   const j = await getJson(`${base}/search?q=${encodeURIComponent('cat dog')}&mode=or`);
   assert.equal(j.mode, 'or');
-  const ids = asSet(j.docIds);
-  assert.deepEqual(ids, new Set(['1','2','3']));
+  assert.deepEqual(idsAsStrings(j.docIds), ['1', '2', '3']);
   assert.equal(j.count, 3);
 }
 
@@ -97,9 +112,10 @@ function asSet(arr) {
 {
   const j = await getJson(`${base}/search?q=${encodeURIComponent('quick')}&include=snippet`);
   assert.ok(Array.isArray(j.results), 'results should be an array when include=snippet');
-  assert.ok(j.results.length >= 1);
+  assert.ok(j.results.length === 2, `expected exactly 2 results for term 'quick', got ${j.results.length}`);
+  assert.deepEqual(j.results.map((r) => String(r.docId)), ['1', '2']);
   for (const r of j.results) {
-    assert.ok(r && (typeof r === 'object'));
+    assert.ok(r && typeof r === 'object');
     assert.ok('docId' in r);
     assert.ok('snippet' in r);
     // snippet can be string or null; should not crash
