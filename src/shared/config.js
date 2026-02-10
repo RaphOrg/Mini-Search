@@ -21,8 +21,10 @@ function portFromEnv(name, fallback) {
 
 export const config = {
   port: portFromEnv('PORT', 3000),
-  // Optional for Phase 1 scaffolding; will become required once DB is used.
+  // Optional for Phase 1 scaffolding; required for Postgres-backed indexing.
   databaseUrl: process.env.DATABASE_URL ?? null,
-  // If/when DB becomes required, switch to:
-  // databaseUrl: required('DATABASE_URL'),
+
+  // Indexing knobs
+  indexBatchSize: Number(process.env.INDEX_BATCH_SIZE ?? 1000),
+  indexPersistPath: process.env.INDEX_PERSIST_PATH ?? null,
 };

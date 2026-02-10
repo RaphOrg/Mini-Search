@@ -1,7 +1,5 @@
-import pg from 'pg';
+import { Pool } from 'pg';
 import { config } from './config.js';
-
-const { Pool } = pg;
 
 /**
  * Minimal Postgres pool helper.

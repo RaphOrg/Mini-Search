@@ -3,6 +3,13 @@ import { getPool } from '../shared/db.js';
 import { InvertedIndex } from './invertedIndex.js';
 import { tokenize, termFrequencies } from './tokenize.js';
 
+function toBigIntId(value) {
+  if (typeof value === 'bigint') return value;
+  if (typeof value === 'number') return BigInt(value);
+  if (typeof value === 'string') return BigInt(value);
+  throw new Error(`Unsupported id type from database: ${typeof value}`);
+}
+
 /**
  * Reads documents from Postgres in batches and builds an inverted index.
  *
@@ -16,13 +23,13 @@ export async function buildInvertedIndex({
   table = 'documents',
   idColumn = 'id',
   contentColumn = 'content',
-  startAfterId = 0,
+  startAfterId = 0n,
   persistPath = null,
 } = {}) {
   const pool = getPool();
   const index = new InvertedIndex();
 
-  let lastId = startAfterId;
+  let lastId = typeof startAfterId === 'bigint' ? startAfterId : BigInt(startAfterId);
 
   // Note: identifiers can't be parameterized; keep MVP constraints and validate
   // column/table names to avoid SQL injection.
@@ -38,6 +45,8 @@ export async function buildInvertedIndex({
   const contentIdent = ident(contentColumn);
 
   while (true) {
+    // node-postgres will send BigInt values to Postgres correctly when used as
+    // query params; if needed, Postgres will coerce from text.
     const res = await pool.query(
       `SELECT ${idIdent} AS id, ${contentIdent} AS content\n` +
         `FROM ${tableIdent}\n` +
@@ -50,7 +59,7 @@ export async function buildInvertedIndex({
     if (res.rows.length === 0) break;
 
     for (const row of res.rows) {
-      const docId = Number(row.id);
+      const docId = toBigIntId(row.id);
       const content = row.content ?? '';
       const tokens = tokenize(content);
       const tfByTerm = termFrequencies(tokens);
