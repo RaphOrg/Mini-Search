@@ -10,7 +10,8 @@
     "start": "node src/index.js",
     "check:tokenizer": "node scripts/tokenizer_check.js",
     "data:generate": "node scripts/generate_and_ingest.js",
-    "bench": "node scripts/rebuild_index_and_benchmark.js"
+    "bench": "node scripts/rebuild_index_and_benchmark.js",
+    "index:build": "node src/indexer/cli.js"
   },
   "dependencies": {
     "dotenv": "^16.4.5",
