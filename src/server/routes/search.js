@@ -65,7 +65,7 @@ export function searchHandler(_req, res, url) {
     payload.results = result.docIds.map((id) => {
       const doc = index.getDoc(id);
       return {
-        docId: id,
+        docId: Number(id),
         snippet: snippetFor(doc?.text ?? '', result.terms),
       };
     });

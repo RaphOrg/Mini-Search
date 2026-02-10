@@ -8,6 +8,7 @@ set -euo pipefail
 
 PORT="${PORT:-3131}"
 BASE_URL="http://127.0.0.1:${PORT}"
+export BASE_URL
 
 cleanup() {
   if [[ -n "${SERVER_PID:-}" ]] && kill -0 "$SERVER_PID" 2>/dev/null; then

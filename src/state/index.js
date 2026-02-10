@@ -1,5 +1,5 @@
 import { InvertedIndex } from '../indexer/invertedIndex.js';
-import { tokenize, termFrequencies } from '../indexer/tokenize.js';
+import { tokenize as sharedTokenize } from '../shared/tokenizer.js';
 
 /**
  * Minimal in-process app state for Phase 1/2.
@@ -8,6 +8,12 @@ import { tokenize, termFrequencies } from '../indexer/tokenize.js';
  * and the entrypoint seeds the index at boot.
  */
 let appIndex = null;
+
+function termFrequencies(tokens) {
+  const tf = new Map();
+  for (const t of tokens) tf.set(t, (tf.get(t) ?? 0) + 1);
+  return tf;
+}
 
 class AppIndex {
   constructor() {
@@ -18,22 +24,36 @@ class AppIndex {
 
   /**
    * Query adapter used by src/query/index.js.
+   *
+   * Keep this stable and independent from the internal index representation.
+   *
    * @param {string} term
-   * @returns {Set<string>} docIds containing the term
+   * @returns {Map<number, number>} Map of docId -> term frequency
    */
   getPostings(term) {
     const list = this.index.postings.get(term) ?? [];
-    return new Set(list.map((p) => String(p.docId)));
+    const out = new Map();
+
+    for (const p of list) {
+      const docId = Number(p?.docId);
+      const tf = Number(p?.tf);
+
+      // Guard against corrupted postings (e.g. from JSON restore).
+      if (!Number.isInteger(docId) || docId < 0) continue;
+      out.set(docId, Number.isFinite(tf) && tf > 0 ? tf : 0);
+    }
+
+    return out;
   }
 
   /** @param {number} id */
   getDoc(id) {
-    return this.docs.get(id) ?? null;
+    return this.docs.get(Number(id)) ?? null;
   }
 
   /** @param {number} id */
   hasDoc(id) {
-    return this.docs.has(id);
+    return this.docs.has(Number(id));
   }
 }
 
@@ -53,7 +73,8 @@ export function initAppIndex(docs = []) {
     const text = typeof doc.text === 'string' ? doc.text : '';
     store.docs.set(id, { id, text });
 
-    const tokens = tokenize(text);
+    // Use the same tokenizer for indexing and querying.
+    const tokens = sharedTokenize(text);
     const tfByTerm = termFrequencies(tokens);
     store.index.addDocument(id, tfByTerm);
   }
