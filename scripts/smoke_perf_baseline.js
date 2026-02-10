@@ -11,6 +11,7 @@ function parseArgs(argv) {
     repeats: 30,
     warmup: 5,
     queries: 'alpha,beta,gamma,w10,w999,w1500',
+    rebuild: true,
   };
 
   for (let i = 2; i < argv.length; i++) {
@@ -22,6 +23,7 @@ function parseArgs(argv) {
     else if (a === '--repeats') args.repeats = Number(argv[++i]);
     else if (a === '--warmup') args.warmup = Number(argv[++i]);
     else if (a === '--queries') args.queries = String(argv[++i]);
+    else if (a === '--no-rebuild') args.rebuild = false;
     else if (a === '--help' || a === '-h') args.help = true;
     else throw new Error(`Unknown arg: ${a}`);
   }
@@ -49,6 +51,7 @@ Options:
   --repeats 30
   --warmup 5
   --queries "alpha,beta,gamma,w10"
+  --no-rebuild   Skip index rebuild (assumes inverted_index is already built)
 
 Requires: DATABASE_URL
 `;
@@ -95,11 +98,27 @@ async function main() {
     '--reset',
   ]);
 
-  process.stdout.write('\n[2/3] Build inverted index\n');
-  await runNode(new URL('./rebuild_index_and_benchmark.js', import.meta.url), ['--repeats', '1', '--warmup', '0', '--limit', '1', '--queries', 'alpha']);
+  if (args.rebuild) {
+    process.stdout.write('\n[2/3] Build inverted index\n');
+    // One index build per run.
+    await runNode(new URL('./rebuild_index_and_benchmark.js', import.meta.url), [
+      '--repeats',
+      '1',
+      '--warmup',
+      '0',
+      '--limit',
+      '1',
+      '--queries',
+      'alpha',
+    ]);
+  } else {
+    process.stdout.write('\n[2/3] Build inverted index (skipped via --no-rebuild)\n');
+  }
 
   process.stdout.write('\n[3/3] Query latency benchmark\n');
+  // Do not rebuild the index during the benchmark loop.
   await runNode(new URL('./rebuild_index_and_benchmark.js', import.meta.url), [
+    '--no-rebuild',
     '--limit',
     String(args.limit),
     '--repeats',

@@ -3,13 +3,14 @@ import { performance } from 'node:perf_hooks';
 import { createPool } from './db.js';
 
 function parseArgs(argv) {
-  const args = { limit: 10, queries: null, repeats: 30, warmup: 5 };
+  const args = { limit: 10, queries: null, repeats: 30, warmup: 5, rebuild: true };
   for (let i = 2; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--limit') args.limit = Number(argv[++i]);
     else if (a === '--repeats') args.repeats = Number(argv[++i]);
     else if (a === '--warmup') args.warmup = Number(argv[++i]);
     else if (a === '--queries') args.queries = String(argv[++i]);
+    else if (a === '--no-rebuild') args.rebuild = false;
     else if (a === '--help' || a === '-h') args.help = true;
     else throw new Error(`Unknown arg: ${a}`);
   }
@@ -20,7 +21,7 @@ function parseArgs(argv) {
 }
 
 function usage() {
-  return `Usage: node scripts/rebuild_index_and_benchmark.js [--limit 10] [--repeats 30] [--warmup 5] [--queries "alpha,beta,w10"]
+  return `Usage: node scripts/rebuild_index_and_benchmark.js [--limit 10] [--repeats 30] [--warmup 5] [--queries "alpha,beta,w10"] [--no-rebuild]
 
 Rebuilds inverted_index from documents and benchmarks query latency.
 Requires DATABASE_URL.
@@ -85,10 +86,14 @@ async function main() {
     // Ensure tables exist (schema.sql is executed by generator; still guard here)
     await pool.query(`SELECT 1 FROM information_schema.tables WHERE table_name = 'documents'`);
 
-    const t0 = performance.now();
-    await rebuildIndex(pool);
-    const indexMs = performance.now() - t0;
-    process.stdout.write(`Index rebuilt in ${indexMs.toFixed(2)} ms\n`);
+    if (args.rebuild) {
+      const t0 = performance.now();
+      await rebuildIndex(pool);
+      const indexMs = performance.now() - t0;
+      process.stdout.write(`Index rebuilt in ${indexMs.toFixed(2)} ms\n`);
+    } else {
+      process.stdout.write('Index rebuild skipped (--no-rebuild)\n');
+    }
 
     const defaultQueries = ['alpha', 'beta', 'gamma', 'w10', 'w999', 'w1500'];
     const queries = args.queries ? args.queries.split(',').map((s) => s.trim()).filter(Boolean) : defaultQueries;
